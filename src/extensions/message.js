@@ -458,6 +458,7 @@ module.exports = Structures.extend('Message', Message => {
 		 * @private
 		 */
 		finalize(responses) {
+			this.client.emit('commandFinalize', this.command, this, Boolean(this.patternMatches));
 			if(this.responses) this.deleteRemainingResponses();
 			this.responses = {};
 			this.responsePositions = {};

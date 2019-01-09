@@ -240,7 +240,7 @@ declare module 'discord.js-commando' {
 		on(event: 'commandReregister', listener: (newCommand: Command, oldCommand: Command) => void): this;
 		on(event: 'commandRun', listener: (command: Command, promise: Promise<any>, message: CommandoMessage, args: object | string | string[], fromPattern: boolean) => void): this;
 		on(event: 'commandStatusChange', listener: (guild: CommandoGuild, command: Command, enabled: boolean) => void): this;
-		on(event: 'commandFinalize', listener: (command: Command, message: CommandMessage, fromPattern: boolean) => void): this;
+		on(event: 'commandFinalize', listener: (command: Command, message: CommandoMessage, fromPattern: boolean) => void): this;
 		on(event: 'commandUnregister', listener: (command: Command) => void): this;
 		on(event: 'groupRegister', listener: (group: CommandGroup, registry: CommandoRegistry) => void): this;
 		on(event: 'groupStatusChange', listener: (guild: CommandoGuild, group: CommandGroup, enabled: boolean) => void): this;
