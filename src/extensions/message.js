@@ -1,9 +1,8 @@
 const { Structures, escapeMarkdown, splitMessage, resolveString } = require('discord.js');
-const { stripIndents, oneLine } = require('common-tags');
+const { oneLine } = require('common-tags');
 const Command = require('../commands/base');
 const FriendlyError = require('../errors/friendly');
 const CommandFormatError = require('../errors/command-format');
-const { permissions } = require('../util');
 
 module.exports = Structures.extend('Message', Message => {
 	/**
@@ -122,9 +121,8 @@ module.exports = Structures.extend('Message', Message => {
 		 * @return {Promise<?Message|?Array<Message>>}
 		 */
 		async run() { // eslint-disable-line complexity
-			// Obtain the member if we don't have it (ugly-ass if statement ahead)
-			if(this.channel.type === 'text' && !this.guild.members.has(this.author.id) &&
-				!this.webhookID) {
+			// Obtain the member if we don't have it
+			if(this.channel.type === 'text' && !this.guild.members.has(this.author.id) && !this.webhookID) {
 				this.member = await this.guild.members.fetch(this.author);
 			}
 
@@ -137,42 +135,42 @@ module.exports = Structures.extend('Message', Message => {
 			if(this.command.guildOnly && !this.guild) {
 				/**
 				 * Emitted when a command is prevented from running
-				 * @event CommandoClient#commandBlocked
+				 * @event CommandoClient#commandBlock
 				 * @param {CommandoMessage} message - Command message that the command is running from
 				 * @param {string} reason - Reason that the command was blocked
-				 * (built-in reasons are `guildOnly`, `nsfw`, `permission`, and `throttling`)
+				 * (built-in reasons are `guildOnly`, `nsfw`, `permission`, `throttling`, and `clientPermissions`)
+				 * @param {Object} [data] - Additional data associated with the block. Built-in reason data properties:
+				 * - guildOnly: none
+				 * - nsfw: none
+				 * - permission: `response` ({@link string}) to send
+				 * - throttling: `throttle` ({@link Object}), `remaining` ({@link number}) time in seconds
+				 * - clientPermissions: `missing` ({@link Array}<{@link string}>) permission names
 				 */
-				this.client.emit('commandBlocked', this, 'guildOnly');
-				return this.reply(`The \`${this.command.name}\` command must be used in a server channel.`);
+				this.client.emit('commandBlock', this, 'guildOnly');
+				return this.command.onBlock(this, 'guildOnly');
 			}
 
+			// Ensure the channel is a NSFW one if required
 			if(this.command.nsfw && !this.channel.nsfw) {
-				this.client.emit('commandBlocked', this, 'nsfw');
-				return this.reply(`The \`${this.command.name}\` command can only be used in NSFW channels.`);
+				this.client.emit('commandBlock', this, 'nsfw');
+				return this.command.onBlock(this, 'nsfw');
 			}
 
 			// Ensure the user has permission to use the command
 			const hasPermission = this.command.hasPermission(this);
 			if(!hasPermission || typeof hasPermission === 'string') {
-				this.client.emit('commandBlocked', this, 'permission');
-				if(typeof hasPermission === 'string') return this.reply(hasPermission);
-				else return this.reply(`You do not have permission to use the \`${this.command.name}\` command.`);
+				const data = { response: typeof hasPermission === 'string' ? hasPermission : undefined };
+				this.client.emit('commandBlock', this, 'permission', data);
+				return this.command.onBlock(this, 'permission', data);
 			}
 
 			// Ensure the client user has the required permissions
 			if(this.channel.type === 'text' && this.command.clientPermissions) {
 				const missing = this.channel.permissionsFor(this.client.user).missing(this.command.clientPermissions);
 				if(missing.length > 0) {
-					this.client.emit('commandBlocked', this, 'clientPermissions');
-					if(missing.length === 1) {
-						return this.reply(
-							`I need the "${permissions[missing[0]]}" permission for the \`${this.command.name}\` command to work.`
-						);
-					}
-					return this.reply(oneLine`
-						I need the following permissions for the \`${this.command.name}\` command to work:
-						${missing.map(perm => permissions[perm]).join(', ')}
-					`);
+					const data = { missing };
+					this.client.emit('commandBlock', this, 'clientPermissions', data);
+					return this.command.onBlock(this, 'clientPermissions', data);
 				}
 			}
 
@@ -180,36 +178,38 @@ module.exports = Structures.extend('Message', Message => {
 			const throttle = this.command.throttle(this.author.id);
 			if(throttle && throttle.usages + 1 > this.command.throttling.usages) {
 				const remaining = (throttle.start + (this.command.throttling.duration * 1000) - Date.now()) / 1000;
-				this.client.emit('commandBlocked', this, 'throttling');
-				return this.reply(
-					`You may not use the \`${this.command.name}\` command again for another ${remaining.toFixed(1)} seconds.`
-				);
+				const data = { throttle, remaining };
+				this.client.emit('commandBlock', this, 'throttling', data);
+				return this.command.onBlock(this, 'throttling', data);
 			}
 
 			// Figure out the command arguments
 			let args = this.patternMatches;
+			let collResult = null;
 			if(!args && this.command.argsCollector) {
 				const collArgs = this.command.argsCollector.args;
 				const count = collArgs[collArgs.length - 1].infinite ? Infinity : collArgs.length;
 				const provided = this.constructor.parseArgs(this.argString.trim(), count, this.command.argsSingleQuotes);
 
-				const result = await this.command.argsCollector.obtain(this, provided);
-				if(result.cancelled) {
-					if(result.prompts.length === 0) {
+				collResult = await this.command.argsCollector.obtain(this, provided);
+				if(collResult.cancelled) {
+					if(collResult.prompts.length === 0) {
 						const err = new CommandFormatError(this);
 						return this.reply(err.message);
 					}
 					/**
 					 * Emitted when a command is cancelled (either by typing 'cancel' or not responding in time)
-					 * @event CommandoClient#commandCancelled
+					 * @event CommandoClient#commandCancel
 					 * @param {Command} command - Command that was cancelled
 					 * @param {string} reason - Reason for the command being cancelled
 					 * @param {CommandoMessage} message - Command message that the command ran from (see {@link Command#run})
+					 * @param {?ArgumentCollectorResult} result - Result from obtaining the arguments from the collector
+					 * (if applicable - see {@link Command#run})
 					 */
-					this.client.emit('commandCancelled', this.command, result.cancelled, this);
+					this.client.emit('commandCancel', this.command, collResult.cancelled, this, collResult);
 					return this.reply('Cancelled command.');
 				}
-				args = result.values;
+				args = collResult.values;
 			}
 			if(!args) args = this.parseArgs();
 			const fromPattern = Boolean(this.patternMatches);
@@ -219,7 +219,7 @@ module.exports = Structures.extend('Message', Message => {
 			const typingCount = this.channel.typingCount;
 			try {
 				this.client.emit('debug', `Running command ${this.command.groupID}:${this.command.memberName}.`);
-				const promise = this.command.run(this, args, fromPattern);
+				const promise = this.command.run(this, args, fromPattern, collResult);
 				/**
 				 * Emitted when running a command
 				 * @event CommandoClient#commandRun
@@ -228,8 +228,10 @@ module.exports = Structures.extend('Message', Message => {
 				 * @param {CommandoMessage} message - Command message that the command is running from (see {@link Command#run})
 				 * @param {Object|string|string[]} args - Arguments for the command (see {@link Command#run})
 				 * @param {boolean} fromPattern - Whether the args are pattern matches (see {@link Command#run})
+				 * @param {?ArgumentCollectorResult} result - Result from obtaining the arguments from the collector
+				 * (if applicable - see {@link Command#run})
 				 */
-				this.client.emit('commandRun', this.command, promise, this, args, fromPattern);
+				this.client.emit('commandRun', this.command, promise, this, args, fromPattern, collResult);
 				const retVal = await promise;
 				if(!(retVal instanceof Message || retVal instanceof Array || retVal === null || retVal === undefined)) {
 					throw new TypeError(oneLine`
@@ -248,24 +250,15 @@ module.exports = Structures.extend('Message', Message => {
 				 * @param {CommandoMessage} message - Command message that the command is running from (see {@link Command#run})
 				 * @param {Object|string|string[]} args - Arguments for the command (see {@link Command#run})
 				 * @param {boolean} fromPattern - Whether the args are pattern matches (see {@link Command#run})
+				 * @param {?ArgumentCollectorResult} result - Result from obtaining the arguments from the collector
+				 * (if applicable - see {@link Command#run})
 				 */
-				this.client.emit('commandError', this.command, err, this, args, fromPattern);
+				this.client.emit('commandError', this.command, err, this, args, fromPattern, collResult);
 				if(this.channel.typingCount > typingCount) this.channel.stopTyping();
 				if(err instanceof FriendlyError) {
 					return this.reply(err.message);
 				} else {
-					const owners = this.client.owners;
-					let ownerList = owners ? owners.map((usr, i) => {
-						const or = i === owners.length - 1 && owners.length > 1 ? 'or ' : '';
-						return `${or}${escapeMarkdown(usr.username)}#${usr.discriminator}`;
-					}).join(owners.length > 2 ? ', ' : ' ') : '';
-
-					const invite = this.client.options.invite;
-					return this.reply(stripIndents`
-						An error occurred while running the command: \`${err.name}: ${err.message}\`
-						You shouldn't ever receive an error like this.
-						Please contact ${ownerList || 'the bot owner'}${invite ? ` in this server: ${invite}` : '.'}
-					`);
+					return this.command.onError(err, this, args, fromPattern, collResult);
 				}
 			}
 		}

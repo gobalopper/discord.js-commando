@@ -27,6 +27,7 @@ module.exports = class EvalCommand extends Command {
 		});
 
 		this.lastResult = null;
+		Object.defineProperty(this, '_sensitivePattern', { value: null, configurable: true });
 	}
 
 	run(msg, args) {
@@ -34,7 +35,6 @@ module.exports = class EvalCommand extends Command {
 		/* eslint-disable no-unused-vars */
 		const message = msg;
 		const client = msg.client;
-		const objects = client.registry.evalObjects;
 		const lastResult = this.lastResult;
 		const doReply = val => {
 			if(val instanceof Error) {
@@ -104,7 +104,7 @@ module.exports = class EvalCommand extends Command {
 			const client = this.client;
 			let pattern = '';
 			if(client.token) pattern += escapeRegex(client.token);
-			Object.defineProperty(this, '_sensitivePattern', { value: new RegExp(pattern, 'gi') });
+			Object.defineProperty(this, '_sensitivePattern', { value: new RegExp(pattern, 'gi'), configurable: false });
 		}
 		return this._sensitivePattern;
 	}
