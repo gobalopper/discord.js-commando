@@ -17,7 +17,7 @@
 		"commands"
 	],
 	"scripts": {
-		"test": "npm run lint && npm run docs:test",
+		"test": "yarn run lint && yarn run docs:test",
 		"lint": "eslint src",
 		"lint:fix": "eslint --fix src",
 		"docs": "docgen --source src --custom docs/index.yml --output docs/docs.json",
@@ -30,10 +30,10 @@
 		"require-all": "^3.0.0"
 	},
 	"devDependencies": {
-		"@types/node": "^10.12.8",
+		"@types/node": "^12.7.3",
 		"discord.js-docgen": "discordjs/docgen",
-		"eslint": "^5.9.0",
-		"typescript": "^3.1.6"
+		"eslint": "^6.3.0",
+		"typescript": "^3.6.2"
 	},
 	"peerDependencies": {
 		"@types/better-sqlite3": "^5.0.0",
